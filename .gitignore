@@ -1,0 +1,11 @@
+**/.vscode
+**/.nii.gz
+**/.DS_Store
+notebooks/**
+.ipynb_checkpoints/*
+**.ipynb
+**.csv
+output/**
+**.png
+presentations/** 
+presentations
