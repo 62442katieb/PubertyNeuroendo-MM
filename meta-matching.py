@@ -285,6 +285,7 @@ def train(
 
     train_phenotype = phenotypes[:-1]
     test_phenotype = phenotypes[-1]
+    # ABCD Study using stratified kfold?
     split_train, split_test = train_test_split(
         np.arange(dset[features].values.shape[0]), test_size=0.2, random_state=seed)
     x_train_raw = dset[features].values[split_train,:]
