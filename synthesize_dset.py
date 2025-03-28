@@ -8,15 +8,10 @@ import matplotlib.pyplot as plt
 from os.path import join
 
 # ugh why d I always make things harder than they need t be
-import tqdm
-
 import torch
 from torch import nn
 from torch.autograd import Variable
 
-
-from dataclasses import dataclass
-from datetime import datetime
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -269,6 +264,11 @@ fake = pd.concat(
         fake2
     ],
     axis=0
+)
+fake['site_id_l'] = np.random.choice(
+    df['site_id_l'].unique(), 
+    len(fake.index), 
+    replace=True
 )
 
 fake.to_csv(
