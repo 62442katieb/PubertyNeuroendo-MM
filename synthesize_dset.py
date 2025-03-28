@@ -186,6 +186,91 @@ fake = pd.DataFrame(
     columns=f_df.columns
 )
 
+##### now for the boys
+
+
+input_size = len(m_df.columns)
+n_samples = len(m_df.index)
+batch_size = 512
+representation_size = 50
+
+n_samples_per_batch = n_samples//input_size
+
+#y = np.array([i for i in range(input_size)  for _ in range(n_samples_per_batch)])
+
+d = np.identity(input_size)
+x = StandardScaler().fit_transform(m_df.values)
+
+model = VAE()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+
+def train(epoch, batches_per_epoch = 501, log_interval=500):
+    model.train()
+    
+    ind = np.arange(x.shape[0])
+    for i in range(batches_per_epoch):
+        data = torch.from_numpy(x[np.random.choice(ind, size=batch_size)]).float()
+        data = Variable(data, requires_grad=False)
+        optimizer.zero_grad()
+        recon_batch, mu, logvar = model(data)
+        loss = model.loss(recon_batch, data, mu, logvar)
+        loss.backward()
+        #train_loss += loss.data[0]
+        optimizer.step()
+        if (i % log_interval == 0) and (epoch % 5 ==0):
+            #Print progress
+            print('Train Epoch: {} [{}/{}]\tLoss: {:.6f}'.format(
+                epoch, i * batch_size, batch_size*batches_per_epoch,
+                loss.data / len(data)))
+
+    print('====> Epoch: {} done!'.format(
+          epoch))
+
+
+def test(epoch, batches_per_epoch=1):
+    model.eval()
+
+    ind = np.arange(x.shape[0])
+    for i in range(batches_per_epoch):
+        
+        data = torch.from_numpy(x[np.random.choice(ind, size=batch_size)]).float()
+        data = Variable(data, requires_grad=False)
+        recon_batch, mu, logvar = model(data)
+        if i == 0:
+            n = min(data.size(0), 2)
+            print(data.view(batch_size, 2,2)[:n])
+            print(recon_batch.view(batch_size, 2,2)[:n])
+
+data = Variable(torch.from_numpy(x).float(), requires_grad=False)
+
+model.train()
+zs = model.get_z(data).data.numpy()
+
+print_examples = False #Change to true if you want to see some examples at each step!
+for epoch in range(1, 50):
+    train(epoch)
+    if print_examples:
+        test(epoch)
+
+
+recon, _, _ = model(data)
+
+fake2 = pd.DataFrame(
+    dtype=float,
+    data=recon.detach().numpy(),
+    index=range(len(m_df.index)),
+    columns=m_df.columns
+)
+
+fake = pd.concat(
+    [
+        fake,
+        fake2
+    ],
+    axis=0
+)
+
 fake.to_csv(
     join(PROJ_DIR, DATA_DIR, 'synthetic_dset.csv')
 )
