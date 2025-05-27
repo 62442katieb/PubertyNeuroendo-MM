@@ -3,7 +3,7 @@ import markdown
 from pathlib import Path
 
 # 1) Read your Markdown
-md_path = Path("report.md")
+md_path = Path("README.md")
 md_txt  = md_path.read_text()
 
 # 2) Convert to HTML

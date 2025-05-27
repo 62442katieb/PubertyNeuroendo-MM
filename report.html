@@ -8,7 +8,7 @@
 </head>
 <body>
 <h1>Fully-Connected 4-Layer DNN – Architecture &amp; Training Report</h1>
-<p><strong>Date:</strong> May 6, 2025
+<p><strong>Date:</strong> May 26, 2025<br />
 <strong>Author:</strong> James</p>
 <hr />
 <h2>1. Hyper-parameters</h2>
@@ -22,39 +22,39 @@
 </thead>
 <tbody>
 <tr>
-<td>``</td>
+<td><strong><code>input_size</code></strong></td>
 <td>158</td>
-<td>Number of engineered features in each sample</td>
+<td>Number of engineered features per sample</td>
 </tr>
 <tr>
 <td><strong>Hidden sizes</strong></td>
 <td><code>n_l1 = 64</code>, <code>n_l2 = 32</code>, <code>n_l3 = 16</code></td>
-<td>Pyramid shape gives good expressiveness without over-parameterising a 5 k-sample data set</td>
+<td>Pyramid shape balances expressiveness and overfitting risk</td>
 </tr>
 <tr>
-<td>``</td>
-<td><em>n</em>phe (= number of hormones)</td>
-<td>Multi-output regression – one output per hormone</td>
+<td><strong><code>output_size</code></strong></td>
+<td><em>n</em><sub>phe</sub> (number of hormones)</td>
+<td>One output per hormone for multi-output regression</td>
 </tr>
 <tr>
-<td>**Dropout **``</td>
+<td><strong>Dropout <code>p</code></strong></td>
 <td>0.5</td>
-<td>Aggressive regularisation for small dataset</td>
+<td>Strong regularization for small dataset</td>
 </tr>
 <tr>
 <td><strong>Batch size</strong></td>
 <td>64</td>
-<td>Keeps CPU busy while fitting in cache/RAM</td>
+<td>Good throughput on CPU/GPU</td>
 </tr>
 <tr>
 <td><strong>Optimizer</strong></td>
-<td>SGD (lr = 1 × 10−3, momentum = 0.9, weight-decay = 1 × 10−4)</td>
-<td>Classic recipe; weight-decay ≈ L2</td>
+<td>SGD (lr = 1 × 10<sup>−3</sup>, momentum = 0.9, weight-decay = 1 × 10<sup>−4</sup>)</td>
+<td>Classic momentum + L2</td>
 </tr>
 <tr>
 <td><strong>LR scheduler</strong></td>
-<td>Multi-step ↓×0.1 at epochs 40 &amp; 80</td>
-<td>Step-decay after early “plateau”</td>
+<td>Multi-step: ×0.1 at epochs 40 &amp; 80</td>
+<td>Step-drop after stagnation</td>
 </tr>
 <tr>
 <td><strong>Epochs</strong></td>
@@ -62,14 +62,19 @@
 <td>Enough to converge after two LR drops</td>
 </tr>
 <tr>
+<td><strong>Early stopping patience</strong></td>
+<td>10 epochs</td>
+<td>Stop if validation loss does not improve for 10 consecutive epochs</td>
+</tr>
+<tr>
 <td><strong>Data split</strong></td>
-<td>64 % train / 16 % val / 20 % test</td>
-<td>Standard practice with fixed random seed</td>
+<td>64 % / 16 % / 20 % (train/val/test)</td>
+<td>Fixed random seed ensures reproducibility</td>
 </tr>
 <tr>
 <td><strong>Loader workers</strong></td>
 <td>4</td>
-<td>Parallel I/O on macOS/CPU</td>
+<td>Parallel data loading on macOS/Windows</td>
 </tr>
 </tbody>
 </table>
@@ -77,20 +82,17 @@
 <h2>2. Model Architecture</h2>
 <div class="mermaid">
 graph LR
-    %% Define nodes with quoted labels so HTML tags work
     A["Input<br/>(158 features)"]
-    B["FC 158 → 64<br/>ReLU / BN / Dropout 0.5"]
-    C["FC 64 → 32<br/>ReLU / BN / Dropout 0.5"]
-    D["FC 32 → 16<br/>ReLU / BN / Dropout 0.5"]
-    E["FC 16 → n_phe<br/>(Linear)"]
+    B["FC 158→64<br/>ReLU → BN → Dropout 0.5"]
+    C["FC 64→32<br/>ReLU → BN → Dropout 0.5"]
+    D["FC 32→16<br/>ReLU → BN → Dropout 0.5"]
+    E["FC 16→n_phe<br/>(Linear)"]
 
-    %% Now connect them
     A --> B
     B --> C
     C --> D
     D --> E
 
-    %% Styling
     style A fill:#dfe6fd,stroke:#4361ee
     style B fill:#b5e48c
     style C fill:#fee440
@@ -98,17 +100,7 @@ graph LR
     style E fill:#f15bb5
 </div>
 
-<p><strong>Figure 1</strong> – Forward pass through 4 fully-connected layers.</p>
-<ul>
-<li><strong>BatchNorm1d</strong> stabilises activations.</li>
-<li><strong>Dropout</strong> applied after activation to regularise.</li>
-</ul>
-<h3>Loss &amp; Optimiser</h3>
-<ul>
-<li><strong>Loss:</strong> <code>msenanloss</code> → mean-squared-error that ignores NaNs in the target (<code>torch.nanmean</code>).</li>
-<li><strong>Optimizer:</strong> SGD + momentum + weight-decay.</li>
-<li><strong>Scheduler:</strong> <code>MultiStepLR</code> stepping down LR by 0.1 at epochs 40 &amp; 80.</li>
-</ul>
+<p><strong>Figure 1</strong> – 4-layer fully-connected DNN: each block = Linear → ReLU → BatchNorm1d → Dropout.</p>
 <hr />
 <h2>3. Data I/O</h2>
 <table>
@@ -123,83 +115,83 @@ graph LR
 <tr>
 <td><strong>Raw X</strong></td>
 <td><code>(N, 158)</code></td>
-<td>Float features (optionally standardised)</td>
+<td>Float features (optionally standardized)</td>
 </tr>
 <tr>
 <td><strong>Raw y</strong></td>
 <td><code>(N, n_phe)</code></td>
-<td>Each column = one hormone</td>
+<td>Each column = a hormone outcome</td>
 </tr>
 <tr>
-<td><strong>Train / Val / Test</strong></td>
-<td>64 % / 16 % / 20 %</td>
-<td><code>train_test_split</code> twice with fixed seed</td>
+<td><strong>Train/Val/Test</strong></td>
+<td>64 % / 16 % / 20 %</td>
+<td><code>train_test_split</code> twice</td>
 </tr>
 <tr>
-<td><strong>Batch (train)</strong></td>
+<td><strong>Batch</strong></td>
 <td><code>(64, 158)</code> → … → <code>(64, n_phe)</code></td>
-<td>DataLoader with <code>pin_memory</code> when CUDA available</td>
+<td>DataLoader w/ <code>pin_memory</code> for CUDA transfers</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Normalization:</strong></p>
-<ul>
-<li>Targets <strong>y</strong> are z-normalised per hormone (μ, σ from training set).</li>
-<li>MAE is later rescaled by σ to report in original units.</li>
-</ul>
+<p>Normalization:<br />
+- y targets z-normalized per hormone (µ, σ from train).<br />
+- MAE later rescaled by σ for original units.</p>
 <hr />
-<h2>4. Validation &amp; Logging</h2>
-<p><strong>Metrics computed on validation set each epoch:</strong></p>
+<h2>4. Validation, Logging &amp; Early Stopping</h2>
+<p>Each epoch on validation produces:</p>
 <table>
 <thead>
 <tr>
 <th>Metric</th>
 <th>Function</th>
 <th>Meaning</th>
-<th></th>
-<th></th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>Val Loss</strong></td>
 <td><code>msenanloss</code></td>
-<td>MSE over validation set (masking NaNs)</td>
-<td></td>
-<td></td>
+<td>Masked MSE over validation set</td>
 </tr>
 <tr>
 <td><strong>Pearson r</strong></td>
 <td><code>nanpearsonr</code></td>
 <td>Linear correlation, NaN-safe</td>
-<td></td>
-<td></td>
 </tr>
 <tr>
 <td><strong>R² (COD)</strong></td>
 <td><code>nancod_znormed</code></td>
-<td>Variance explained after z-normalisation</td>
-<td></td>
-<td></td>
+<td>Variance explained after z-normalization</td>
 </tr>
 <tr>
 <td><strong>MAE</strong></td>
-<td>`nanmean(</td>
-<td>ŷ – y</td>
-<td>) × σ`</td>
-<td>Mean absolute error in original target units</td>
+<td><code>nanmean(|ŷ−y|)×σ</code></td>
+<td>Rescaled mean absolute error in original units</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Checkpoints &amp; Logs:</strong></p>
-<ul>
-<li><strong>Model snapshots:</strong>
-  <code>./train_output/trained_model_abcd/run{run}_epoch{epoch}.pt</code></li>
-<li><strong>Logs:</strong> NumPy arrays (<code>.npy</code>) under
-  <code>./train_output/logs/{model_str}_{record_name}.npy</code></li>
-</ul>
-<p><strong>Early-stop / Selection:</strong>
-Choose the epoch with highest <strong>mean R²</strong> on validation.</p>
+<p><strong>Early stopping:</strong> stops training if <strong>validation loss</strong> fails to improve for <strong>10</strong> consecutive epochs; best weights saved for each run.</p>
+<p><strong>Checkpoints &amp; Logs:</strong><br />
+- <strong>Model snapshots:</strong> <code>./train_output/trained_model_abcd/run{run}_epoch{epoch}.pt</code><br />
+- <strong>Best model:</strong> <code>.../trained_model_abcd/best_run{run}.pt</code><br />
+- <strong>Logs:</strong> <code>./train_output/logs/{model_str}_{record}.npy</code></p>
 <hr />
+<h2>5. Explainability via Integrated Gradients</h2>
+<p>We use Captum’s <strong>IntegratedGradients</strong> to attribute input features:</p>
+<ul>
+<li><strong>Baseline:</strong> zero vector, broadcasted to batch  </li>
+<li><strong>Steps:</strong> 50 Riemann steps for path integral  </li>
+<li><strong>Target:</strong> output neuron index per hormone  </li>
+</ul>
+<p>```python
+from captum.attr import IntegratedGradients</p>
+<p>ig = IntegratedGradients(net)
+attr = ig.attribute(
+    inputs=x,
+    baselines=torch.zeros((1, x.size(1))).to(device),
+    target=target_index,
+    n_steps=50
+)</p>
 </body>
 </html>
