@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>DNN Report</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad:true});</script>
+</head>
+<body>
+<h1>Fully-Connected 4-Layer DNN – Architecture &amp; Training Report</h1>
+<p><strong>Date:</strong> May 6, 2025
+<strong>Author:</strong> James</p>
+<hr />
+<h2>1. Hyper-parameters</h2>
+<table>
+<thead>
+<tr>
+<th>Symbol / Arg</th>
+<th>Value</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>``</td>
+<td>158</td>
+<td>Number of engineered features in each sample</td>
+</tr>
+<tr>
+<td><strong>Hidden sizes</strong></td>
+<td><code>n_l1 = 64</code>, <code>n_l2 = 32</code>, <code>n_l3 = 16</code></td>
+<td>Pyramid shape gives good expressiveness without over-parameterising a 5 k-sample data set</td>
+</tr>
+<tr>
+<td>``</td>
+<td><em>n</em>phe (= number of hormones)</td>
+<td>Multi-output regression – one output per hormone</td>
+</tr>
+<tr>
+<td>**Dropout **``</td>
+<td>0.5</td>
+<td>Aggressive regularisation for small dataset</td>
+</tr>
+<tr>
+<td><strong>Batch size</strong></td>
+<td>64</td>
+<td>Keeps CPU busy while fitting in cache/RAM</td>
+</tr>
+<tr>
+<td><strong>Optimizer</strong></td>
+<td>SGD (lr = 1 × 10−3, momentum = 0.9, weight-decay = 1 × 10−4)</td>
+<td>Classic recipe; weight-decay ≈ L2</td>
+</tr>
+<tr>
+<td><strong>LR scheduler</strong></td>
+<td>Multi-step ↓×0.1 at epochs 40 &amp; 80</td>
+<td>Step-decay after early “plateau”</td>
+</tr>
+<tr>
+<td><strong>Epochs</strong></td>
+<td>128</td>
+<td>Enough to converge after two LR drops</td>
+</tr>
+<tr>
+<td><strong>Data split</strong></td>
+<td>64 % train / 16 % val / 20 % test</td>
+<td>Standard practice with fixed random seed</td>
+</tr>
+<tr>
+<td><strong>Loader workers</strong></td>
+<td>4</td>
+<td>Parallel I/O on macOS/CPU</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>2. Model Architecture</h2>
+<div class="mermaid">
+graph LR
+    %% Define nodes with quoted labels so HTML tags work
+    A["Input<br/>(158 features)"]
+    B["FC 158 → 64<br/>ReLU / BN / Dropout 0.5"]
+    C["FC 64 → 32<br/>ReLU / BN / Dropout 0.5"]
+    D["FC 32 → 16<br/>ReLU / BN / Dropout 0.5"]
+    E["FC 16 → n_phe<br/>(Linear)"]
+
+    %% Now connect them
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+
+    %% Styling
+    style A fill:#dfe6fd,stroke:#4361ee
+    style B fill:#b5e48c
+    style C fill:#fee440
+    style D fill:#ff9f1c
+    style E fill:#f15bb5
+</div>
+
+<p><strong>Figure 1</strong> – Forward pass through 4 fully-connected layers.</p>
+<ul>
+<li><strong>BatchNorm1d</strong> stabilises activations.</li>
+<li><strong>Dropout</strong> applied after activation to regularise.</li>
+</ul>
+<h3>Loss &amp; Optimiser</h3>
+<ul>
+<li><strong>Loss:</strong> <code>msenanloss</code> → mean-squared-error that ignores NaNs in the target (<code>torch.nanmean</code>).</li>
+<li><strong>Optimizer:</strong> SGD + momentum + weight-decay.</li>
+<li><strong>Scheduler:</strong> <code>MultiStepLR</code> stepping down LR by 0.1 at epochs 40 &amp; 80.</li>
+</ul>
+<hr />
+<h2>3. Data I/O</h2>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Shape</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Raw X</strong></td>
+<td><code>(N, 158)</code></td>
+<td>Float features (optionally standardised)</td>
+</tr>
+<tr>
+<td><strong>Raw y</strong></td>
+<td><code>(N, n_phe)</code></td>
+<td>Each column = one hormone</td>
+</tr>
+<tr>
+<td><strong>Train / Val / Test</strong></td>
+<td>64 % / 16 % / 20 %</td>
+<td><code>train_test_split</code> twice with fixed seed</td>
+</tr>
+<tr>
+<td><strong>Batch (train)</strong></td>
+<td><code>(64, 158)</code> → … → <code>(64, n_phe)</code></td>
+<td>DataLoader with <code>pin_memory</code> when CUDA available</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Normalization:</strong></p>
+<ul>
+<li>Targets <strong>y</strong> are z-normalised per hormone (μ, σ from training set).</li>
+<li>MAE is later rescaled by σ to report in original units.</li>
+</ul>
+<hr />
+<h2>4. Validation &amp; Logging</h2>
+<p><strong>Metrics computed on validation set each epoch:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Function</th>
+<th>Meaning</th>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Val Loss</strong></td>
+<td><code>msenanloss</code></td>
+<td>MSE over validation set (masking NaNs)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>Pearson r</strong></td>
+<td><code>nanpearsonr</code></td>
+<td>Linear correlation, NaN-safe</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>R² (COD)</strong></td>
+<td><code>nancod_znormed</code></td>
+<td>Variance explained after z-normalisation</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>MAE</strong></td>
+<td>`nanmean(</td>
+<td>ŷ – y</td>
+<td>) × σ`</td>
+<td>Mean absolute error in original target units</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Checkpoints &amp; Logs:</strong></p>
+<ul>
+<li><strong>Model snapshots:</strong>
+  <code>./train_output/trained_model_abcd/run{run}_epoch{epoch}.pt</code></li>
+<li><strong>Logs:</strong> NumPy arrays (<code>.npy</code>) under
+  <code>./train_output/logs/{model_str}_{record_name}.npy</code></li>
+</ul>
+<p><strong>Early-stop / Selection:</strong>
+Choose the epoch with highest <strong>mean R²</strong> on validation.</p>
+<hr />
+</body>
+</html>
