@@ -66,3 +66,8 @@ def main():
 if __name__ == "__main__":
     # Needed on macOS / Windows when num_workers > 0
     main()
+
+# path = './train_output/feature_importance_ig/run0_feature_relevance.npy'
+# rel = np.load(path)
+# print(rel.shape)      # e.g. (158,)
+# print(rel[:10])       # first ten relevance values

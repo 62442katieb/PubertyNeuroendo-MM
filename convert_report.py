@@ -28,7 +28,7 @@ full_html = f"""<!DOCTYPE html>
 """
 
 # 4) Write it out
-out_path = Path("report.html")
+out_path = Path("model.html")
 out_path.write_text(full_html)
 
 print(f"Written {out_path.resolve()}")

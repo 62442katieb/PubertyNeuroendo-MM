@@ -24,6 +24,7 @@ from scipy.stats import pearsonr
 from sklearn.metrics import r2_score
 from pathlib import Path
 from typing import Optional
+from ig_captum import explain_all_targets
 
 class abcd_dataset(torch.utils.data.Dataset):
     """PyTorch dataset class
@@ -381,26 +382,21 @@ class dnn_4l(nn.Module):
 
 
 
-def train(dset, features, phenotypes,
-          runs=1, epochs=4, seed=4,
-          n_nodes=[64, 32, 16],
-          out_dir='./train_output',
-          across_dataset=False,  # pass these in if you need them
-          exp_dataset=False):
-    '''main function for DNN network
-
-    Args:
-        dset : pandas DataFrame with `input` and `phenotype` as columns, participants as rows
-        features : list or regex, features for DNN
-        phenotypes : list, outcomes/phenotypes predicted by DNN, present as columns in `dset` 
-        runs : int, 
-        epochs : int,
-        seed : int, sets random state
-        n_nodes : list of ints, len(layers) number of nodes per layer
-
-    Returns:
-        None
-    '''
+def train(
+    dset,
+    features,
+    phenotypes,
+    runs: int = 1,
+    epochs: int = 128,
+    seed: int = 4,
+    n_nodes: list = [64, 32, 16],
+    out_dir: str = './train_output',
+    across_dataset: bool = False,
+    exp_dataset: bool = False,
+) -> float:
+    """
+    Main training loop with early stopping. Returns best validation loss.
+    """
     args = {
     "batch_size":      64,       # ~80 batches/epoch → good CPU/GIL utilization 
     "num_workers":     4,        # parallel data‐loads (macOS uses 'spawn', so keep modest)
@@ -411,50 +407,63 @@ def train(dset, features, phenotypes,
     "scheduler_decrease": 40,    # drop LR at epoch 40 and 80 (with epochs=128)
     "gamma":           0.1       # LR → 1e-4 and then 1e-5
     }
+    # apply any overrides from grid_search.py
+    override = globals().get("ARGS_OVERRIDE", {})
+    args.update(override)
+    
     # reproducibility
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    pin_memory = device.type == "cuda"
+    pin_memory = (device.type == "cuda")
 
-    # === data split ===
+    # === data split & z-norm y ===
     N = len(dset)
-    idx_train, idx_test = train_test_split(np.arange(N), test_size=0.2, random_state=seed)
-    x_all = dset[features].values
-    y_all = dset[phenotypes].values
+    idx_train, idx_test = train_test_split(
+        np.arange(N), test_size=0.2, random_state=seed
+    )
+    X = dset[features].values
+    Y = dset[phenotypes].values
 
-    x_train_raw, y_train_raw = x_all[idx_train], y_all[idx_train]
-    x_test_raw,  y_test_raw  = x_all[idx_test],  y_all[idx_test]
+    x_tr_raw, y_tr_raw = X[idx_train], Y[idx_train]
+    x_te_raw, y_te_raw = X[idx_test],  Y[idx_test]
+    idx_tr, idx_val = train_test_split(
+        np.arange(len(x_tr_raw)), test_size=0.2, random_state=seed
+    )
+    x_tr, y_tr = x_tr_raw[idx_tr], y_tr_raw[idx_tr]
+    x_val, y_val = x_tr_raw[idx_val], y_tr_raw[idx_val]
 
-    idx_tra, idx_val = train_test_split(np.arange(len(x_train_raw)), test_size=0.2, random_state=seed)
-    x_train, y_train = x_train_raw[idx_tra], y_train_raw[idx_tra]
-    x_val,   y_val   = x_train_raw[idx_val], y_train_raw[idx_val]
-
-    # === normalize y ===
-    y_train, y_val, y_test, t_sigma = mics_z_norm(y_train, y_val, y_test_raw)
-
-    # (optionally) normalize X here with a StandardScaler...
+    y_tr, y_val, y_te, t_sigma = mics_z_norm(y_tr, y_val, y_te_raw)
 
     # === DataLoaders ===
+    print("→ about to create DataLoaders")
     trainloader = DataLoader(
-        abcd_dataset(x_train, y_train),
-        batch_size=args["batch_size"], shuffle=True,
-        num_workers=args["num_workers"], pin_memory=pin_memory)
-
+        abcd_dataset(x_tr, y_tr),
+        batch_size=args["batch_size"],
+        shuffle=True,
+        num_workers=args["num_workers"],
+        pin_memory=pin_memory
+    )
+    print("→ DataLoaders created successfully!")
     validLoader = DataLoader(
         abcd_dataset(x_val, y_val),
-        batch_size=args["batch_size"], shuffle=False,
-        num_workers=args["num_workers"], pin_memory=pin_memory)
-
+        batch_size=args["batch_size"],
+        shuffle=False,
+        num_workers=args["num_workers"],
+        pin_memory=pin_memory
+    )
     testLoader = DataLoader(
-        abcd_dataset(x_test_raw, y_test),
-        batch_size=args["batch_size"], shuffle=False,
-        num_workers=args["num_workers"], pin_memory=pin_memory)
+        abcd_dataset(x_te_raw, y_te),
+        batch_size=args["batch_size"],
+        shuffle=False,
+        num_workers=args["num_workers"],
+        pin_memory=pin_memory
+    )
 
     # prepare logging arrays…
-    n_phe = y_train.shape[1]
+    n_phe = y_tr.shape[1]
     tra_los_record = np.zeros((runs, epochs))
     val_los_record = np.zeros((runs, epochs))
     tra_cor_record = np.zeros((runs, epochs, n_phe))
@@ -463,21 +472,23 @@ def train(dset, features, phenotypes,
     val_cod_record = np.zeros((runs, epochs, n_phe))
     tra_mae_record = np.zeros((runs, epochs, n_phe))
     val_mae_record = np.zeros((runs, epochs, n_phe))
-    tes_res_record = np.zeros((runs, epochs, len(x_test_raw), n_phe))
+    tes_res_record = np.zeros((runs, epochs, len(x_te_raw), n_phe))
     val_res_record = np.zeros((runs, epochs, len(x_val),    n_phe))
 
-    os.makedirs(out_dir, exist_ok=True)
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
     model_dir = Path(out_dir) / 'trained_model_abcd'
     model_dir.mkdir(exist_ok=True)
 
+    # early stopping
     patience = 10
-    # === training & validation loop ===
+    best_run_loss = float('inf')
+
     for run in range(runs):
         best_val_loss = float('inf')
         epochs_no_improve = 0
-        
+
         net = dnn_4l(
-            input_size=x_train.shape[1],
+            input_size=x_tr.shape[1],
             n_l1=n_nodes[0],
             n_l2=n_nodes[1],
             n_l3=n_nodes[2],
@@ -490,111 +501,85 @@ def train(dset, features, phenotypes,
             net.parameters(),
             lr=args["lr"],
             momentum=args["momentum"],
-            weight_decay=args["weight_decay"])
-
+            weight_decay=args["weight_decay"]
+        )
         scheduler = MultiStepLR(
             optimizer,
             milestones=[args["scheduler_decrease"], args["scheduler_decrease"]*2],
-            gamma=args["gamma"])
+            gamma=args["gamma"]
+        )
 
         for epoch in range(epochs):
-            # ---- train ----
             net.train()
             train_loss = 0.0
-            for x, y in trainloader:
-                x, y = x.to(device), y.to(device)
+            for xb, yb in trainloader:
+                xb, yb = xb.to(device), yb.to(device)
                 optimizer.zero_grad()
-                outputs = net(x)
-
-                mask = torch.isnan(y)
-                loss = criterion(outputs, y, mask=mask)
+                out = net(xb)
+                loss = criterion(out, yb, mask=torch.isnan(yb))
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-
             tra_los_record[run, epoch] = train_loss / len(trainloader)
 
-            # ---- eval on train (for metrics) ----
+            # training metrics
             corr, cod, mae, _ = mics_infer_metric(
-                trainloader, net, criterion, device, t_sigma, output_size=n_phe)
+                trainloader, net, criterion, device, t_sigma, output_size=n_phe
+            )
             tra_cor_record[run, epoch] = corr
             tra_cod_record[run, epoch] = cod
             tra_mae_record[run, epoch] = mae
 
-            # ---- validate ----
+            # validation
             corr, cod, mae, val_loss, _, val_pred = mics_infer_metric(
                 validLoader, net, criterion, device, t_sigma,
-                output_size=n_phe, need_value=True)
-
+                output_size=n_phe, need_value=True
+            )
             val_cor_record[run, epoch] = corr
             val_cod_record[run, epoch] = cod
             val_mae_record[run, epoch] = mae
             val_los_record[run, epoch] = val_loss
             val_res_record[run, epoch] = val_pred.squeeze()
-
             print_result(corr, cod, mae, val_loss, epoch)
 
-            # ---- early stopping check ----
+            # early stopping
             if val_loss < best_val_loss - 1e-6:
                 best_val_loss = val_loss
                 epochs_no_improve = 0
-                torch.save(net.state_dict(), model_dir / f'best_run{run}.pt')
+                torch.save(net.state_dict(), model_dir/f'best_run{run}.pt')
             else:
                 epochs_no_improve += 1
+                if epochs_no_improve >= patience:
+                    print(f"Run {run}: early stopping at epoch {epoch}")
+                    break
 
-            if epochs_no_improve >= patience:
-                print(f"Run {run}: stopping at epoch {epoch} (no val loss improvement for {patience} epochs).")
-                break
-            # ---- test predictions only ----
+            # test predictions
             _, _, _, _, _, tes_pred = mics_infer_metric(
                 testLoader, net, criterion, device, t_sigma,
-                output_size=n_phe, need_value=True)
+                output_size=n_phe, need_value=True
+            )
             tes_res_record[run, epoch] = tes_pred.squeeze()
 
-            # ---- scheduler step ----
             scheduler.step()
+            torch.save(net.state_dict(), model_dir/f'run{run}_epoch{epoch}.pt')
 
-            # ---- save model snapshot ----
-            path = model_dir / f'run{run}_epoch{epoch}.pt'
-            torch.save(net.state_dict(), path)
-        # === after finishing all epochs for this run ===
-    # print(f"\nRun {run}: computing feature importance via LRP…")
-    # rel = lrp_captum.explain_features(
-    #     net,
-    #     validLoader,
-    #     device,
-    #     feature_names=features,
-    #     target_index=0,
-    #     max_batches=50,
-    #     eps=1e-6
-    # )
-    # # save a per-run relevance vector
-    # # ensure the subfolder exists
-    # feat_dir = os.path.join(out_dir, "feature_importance")
-    # os.makedirs(feat_dir, exist_ok=True)
-    # np.save(os.path.join(feat_dir, f"run{run}_feature_relevance.npy"), rel)
-    # print(f"Saved feature relevance for run {run} → {feat_dir}")
-    
-    from ig_captum import explain_all_targets
-    
-    explain_all_targets(
-        net,
-        validLoader,
-        device,
-        feature_names=features,
-        out_dir=out_dir,
-        run=run,
-        steps=50,
-        max_batches=50
-    )
+        # load best and explain
+        net.load_state_dict(torch.load(model_dir/f'best_run{run}.pt'))
+        explain_all_targets(
+            net, validLoader, device,
+            feature_names=features,
+            out_dir=out_dir,
+            run=run, steps=50, max_batches=50
+        )
+        best_run_loss = min(best_run_loss, best_val_loss)
 
-    # === final logging / recap ===
+    # final logging
     model_str = 'dnn'
-    if across_dataset:  model_str += '_across_dataset'
-    if exp_dataset:     model_str += '_exp_dataset'
+    if across_dataset: model_str += '_across_dataset'
+    if exp_dataset:    model_str += '_exp_dataset'
 
     mics_log(
-        model_str, out_dir, metric='metric_name', index='index_name',
+        model_str, out_dir,
         tra_los_record=tra_los_record,
         val_los_record=val_los_record,
         tra_cor_record=tra_cor_record,
@@ -607,3 +592,5 @@ def train(dset, features, phenotypes,
         val_res_record=val_res_record,
         t_sigma=t_sigma
     )
+
+    return best_run_loss

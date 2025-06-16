@@ -9,3 +9,11 @@ output/**
 **.png
 presentations/** 
 presentations
+# ignore all training outputs
+train_output/**
+gs_output/**
+
+# ignore all json files
+**.json
+# ignore all log files
+**.log
