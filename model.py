@@ -435,6 +435,13 @@ def train(
     x_tr, y_tr = x_tr_raw[idx_tr], y_tr_raw[idx_tr]
     x_val, y_val = x_tr_raw[idx_val], y_tr_raw[idx_val]
 
+    # Track participant indices for each split
+    original_train_idx = idx_train  # Original dataset indices for training split
+    original_test_idx = idx_test    # Original dataset indices for test split
+    # For validation: need to map back to original dataset indices
+    original_val_idx = idx_train[idx_val]  # Original dataset indices for validation split
+    original_train_final_idx = idx_train[idx_tr]  # Original dataset indices for final training split
+
     y_tr, y_val, y_te, t_sigma = mics_z_norm(y_tr, y_val, y_te_raw)
 
     # === DataLoaders ===
@@ -442,7 +449,7 @@ def train(
     trainloader = DataLoader(
         abcd_dataset(x_tr, y_tr),
         batch_size=args["batch_size"],
-        shuffle=True,
+        shuffle=False,
         num_workers=args["num_workers"],
         pin_memory=pin_memory
     )
@@ -578,6 +585,20 @@ def train(
     if across_dataset: model_str += '_across_dataset'
     if exp_dataset:    model_str += '_exp_dataset'
 
+    # Create participant mapping info for easy reconstruction
+    participant_mapping = {
+        'test_indices': original_test_idx,          # Maps tes_res_record[run, epoch, i] -> original_test_idx[i]
+        'val_indices': original_val_idx,            # Maps val_res_record[run, epoch, i] -> original_val_idx[i]
+        'train_final_indices': original_train_final_idx,  # Final training set indices
+        'split_info': {
+            'total_participants': N,
+            'train_size': len(original_train_final_idx),
+            'val_size': len(original_val_idx),
+            'test_size': len(original_test_idx),
+            'random_seed': seed
+        }
+    }
+
     mics_log(
         model_str, out_dir,
         tra_los_record=tra_los_record,
@@ -590,7 +611,12 @@ def train(
         val_mae_record=val_mae_record,
         tes_res_record=tes_res_record,
         val_res_record=val_res_record,
-        t_sigma=t_sigma
+        t_sigma=t_sigma,
+        # Add participant index mappings
+        original_test_idx=original_test_idx,
+        original_val_idx=original_val_idx,
+        original_train_final_idx=original_train_final_idx,
+        participant_mapping=participant_mapping
     )
 
     return best_run_loss

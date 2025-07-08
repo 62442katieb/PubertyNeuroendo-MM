@@ -184,14 +184,112 @@ graph LR
 <li><strong>Steps:</strong> 50 Riemann steps for path integral  </li>
 <li><strong>Target:</strong> output neuron index per hormone  </li>
 </ul>
-<p>```python
-from captum.attr import IntegratedGradients</p>
-<p>ig = IntegratedGradients(net)
+<pre><code class="language-python">from captum.attr import IntegratedGradients
+
+ig = IntegratedGradients(net)
 attr = ig.attribute(
     inputs=x,
     baselines=torch.zeros((1, x.size(1))).to(device),
     target=target_index,
     n_steps=50
-)</p>
+)
+</code></pre>
+<p><strong>Output:</strong> <code>./train_output/feature_importance_ig/run{run}_target{target}_relevance.npy</code></p>
+<hr />
+<h2>6. Participant Mapping &amp; Index Tracking</h2>
+<p><strong>Problem:</strong> The training logs save predictions (<code>tes_res_record</code>, <code>val_res_record</code>) but without participant IDs, making it impossible to match predictions back to individual participants.</p>
+<p><strong>Solution:</strong> Added participant index tracking to maintain the mapping between prediction arrays and original dataset rows.</p>
+<h3>What's Added to model.py:</h3>
+<ol>
+<li>
+<p><strong>Index tracking variables</strong> (lines 438-443):
+   <code>python
+   # Track participant indices for each split
+   original_train_idx = idx_train  # Original dataset indices for training split
+   original_test_idx = idx_test    # Original dataset indices for test split
+   original_val_idx = idx_train[idx_val]  # Original dataset indices for validation split
+   original_train_final_idx = idx_train[idx_tr]  # Original dataset indices for final training split</code></p>
+</li>
+<li>
+<p><strong>Participant mapping dictionary</strong> (lines 588-600):
+   <code>python
+   participant_mapping = {
+       'test_indices': original_test_idx,          # Maps tes_res_record[run, epoch, i] -&gt; original_test_idx[i]
+       'val_indices': original_val_idx,            # Maps val_res_record[run, epoch, i] -&gt; original_val_idx[i]
+       'train_final_indices': original_train_final_idx,  # Final training set indices
+       'split_info': {
+           'total_participants': N,
+           'train_size': len(original_train_final_idx),
+           'val_size': len(original_val_idx),
+           'test_size': len(original_test_idx),
+           'random_seed': seed
+       }
+   }</code></p>
+</li>
+<li>
+<p><strong>Saved to logs</strong>: All index mappings are saved as <code>.npy</code> files in <code>./train_output/logs/</code>:</p>
+</li>
+<li><code>original_test_idx.npy</code>: Maps test predictions to original dataset rows</li>
+<li><code>original_val_idx.npy</code>: Maps validation predictions to original dataset rows</li>
+<li><code>original_train_final_idx.npy</code>: Maps training predictions to original dataset rows</li>
+<li>
+<p><code>participant_mapping.npy</code>: Complete mapping information</p>
+</li>
+<li>
+<p><strong>Training DataLoader</strong>: Changed <code>shuffle=False</code> to maintain index order for participant tracking.</p>
+</li>
+</ol>
+<h3>How to Use Participant Mapping:</h3>
+<h4>Step 1: Load your original dataset</h4>
+<pre><code class="language-python">import pandas as pd
+import numpy as np
+
+# Load original dataset
+df = pd.read_pickle('synthetic_dset-M.pkl')  # or synthetic_dset_F.pkl
+</code></pre>
+<h4>Step 2: Read the mapping files</h4>
+<pre><code class="language-python"># Read participant mapping
+test_indices = np.load('./train_output/logs/original_test_idx.npy')
+val_indices = np.load('./train_output/logs/original_val_idx.npy')
+participant_mapping = np.load('./train_output/logs/participant_mapping.npy', allow_pickle=True).item()
+
+# Read prediction results
+test_predictions = np.load('./train_output/logs/dnn_tes_res_record.npy')  # Shape: (runs, epochs, n_test, n_hormones)
+val_predictions = np.load('./train_output/logs/dnn_val_res_record.npy')   # Shape: (runs, epochs, n_val, n_hormones)
+</code></pre>
+<h4>Step 3: Match predictions to participants</h4>
+<pre><code class="language-python"># Example: Get test predictions for run 0, epoch 50
+run_id = 0
+epoch_id = 50
+test_pred = test_predictions[run_id, epoch_id]  # Shape: (n_test, n_hormones)
+
+# Match to original participants
+test_participant_data = df.iloc[test_indices]  # Original participant data
+test_participant_data['predicted_dhea'] = test_pred[:, 0]  # Add predictions
+test_participant_data['predicted_ert'] = test_pred[:, 1]
+
+# Now you can analyze by participant characteristics
+print(&quot;Test predictions with participant info:&quot;)
+print(test_participant_data[['site_id_l', 'filtered_dhea', 'predicted_dhea', 'filtered_ert', 'predicted_ert']].head())
+</code></pre>
+<h3>Using read_npy.py for Participant Mapping:</h3>
+<pre><code class="language-bash"># List all available log files
+python read_npy.py list ./train_output/logs
+
+# Check participant mapping structure
+python read_npy.py ./train_output/logs/participant_mapping.npy
+
+# Check test indices
+python read_npy.py ./train_output/logs/original_test_idx.npy
+
+# Check prediction results
+python read_npy.py ./train_output/logs/dnn_tes_res_record.npy
+</code></pre>
+<p>The <code>read_npy.py</code> script will show you:
+- Array shapes and dimensions
+- Sample data for understanding structure
+- Interactive options to explore specific slices
+- Ability to save as text files for external analysis</p>
+<hr />
 </body>
 </html>

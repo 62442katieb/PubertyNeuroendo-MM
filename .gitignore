@@ -17,3 +17,6 @@ gs_output/**
 **.json
 # ignore all log files
 **.log
+
+# ignore CLAUDE.md
+**CLAUDE.md
