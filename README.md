@@ -102,3 +102,113 @@ attr = ig.attribute(
     target=target_index,
     n_steps=50
 )
+```
+
+**Output:** `./train_output/feature_importance_ig/run{run}_target{target}_relevance.npy`
+
+---
+
+## 6. Participant Mapping & Index Tracking
+
+**Problem:** The training logs save predictions (`tes_res_record`, `val_res_record`) but without participant IDs, making it impossible to match predictions back to individual participants.
+
+**Solution:** Added participant index tracking to maintain the mapping between prediction arrays and original dataset rows.
+
+### What's Added to model.py:
+
+1. **Index tracking variables** (lines 438-443):
+   ```python
+   # Track participant indices for each split
+   original_train_idx = idx_train  # Original dataset indices for training split
+   original_test_idx = idx_test    # Original dataset indices for test split
+   original_val_idx = idx_train[idx_val]  # Original dataset indices for validation split
+   original_train_final_idx = idx_train[idx_tr]  # Original dataset indices for final training split
+   ```
+
+2. **Participant mapping dictionary** (lines 588-600):
+   ```python
+   participant_mapping = {
+       'test_indices': original_test_idx,          # Maps tes_res_record[run, epoch, i] -> original_test_idx[i]
+       'val_indices': original_val_idx,            # Maps val_res_record[run, epoch, i] -> original_val_idx[i]
+       'train_final_indices': original_train_final_idx,  # Final training set indices
+       'split_info': {
+           'total_participants': N,
+           'train_size': len(original_train_final_idx),
+           'val_size': len(original_val_idx),
+           'test_size': len(original_test_idx),
+           'random_seed': seed
+       }
+   }
+   ```
+
+3. **Saved to logs**: All index mappings are saved as `.npy` files in `./train_output/logs/`:
+   - `original_test_idx.npy`: Maps test predictions to original dataset rows
+   - `original_val_idx.npy`: Maps validation predictions to original dataset rows
+   - `original_train_final_idx.npy`: Maps training predictions to original dataset rows
+   - `participant_mapping.npy`: Complete mapping information
+
+4. **Training DataLoader**: Changed `shuffle=False` to maintain index order for participant tracking.
+
+### How to Use Participant Mapping:
+
+#### Step 1: Load your original dataset
+```python
+import pandas as pd
+import numpy as np
+
+# Load original dataset
+df = pd.read_pickle('synthetic_dset-M.pkl')  # or synthetic_dset_F.pkl
+```
+
+#### Step 2: Read the mapping files
+```python
+# Read participant mapping
+test_indices = np.load('./train_output/logs/original_test_idx.npy')
+val_indices = np.load('./train_output/logs/original_val_idx.npy')
+participant_mapping = np.load('./train_output/logs/participant_mapping.npy', allow_pickle=True).item()
+
+# Read prediction results
+test_predictions = np.load('./train_output/logs/dnn_tes_res_record.npy')  # Shape: (runs, epochs, n_test, n_hormones)
+val_predictions = np.load('./train_output/logs/dnn_val_res_record.npy')   # Shape: (runs, epochs, n_val, n_hormones)
+```
+
+#### Step 3: Match predictions to participants
+```python
+# Example: Get test predictions for run 0, epoch 50
+run_id = 0
+epoch_id = 50
+test_pred = test_predictions[run_id, epoch_id]  # Shape: (n_test, n_hormones)
+
+# Match to original participants
+test_participant_data = df.iloc[test_indices]  # Original participant data
+test_participant_data['predicted_dhea'] = test_pred[:, 0]  # Add predictions
+test_participant_data['predicted_ert'] = test_pred[:, 1]
+
+# Now you can analyze by participant characteristics
+print("Test predictions with participant info:")
+print(test_participant_data[['site_id_l', 'filtered_dhea', 'predicted_dhea', 'filtered_ert', 'predicted_ert']].head())
+```
+
+### Using read_npy.py for Participant Mapping:
+
+```bash
+# List all available log files
+python read_npy.py list ./train_output/logs
+
+# Check participant mapping structure
+python read_npy.py ./train_output/logs/participant_mapping.npy
+
+# Check test indices
+python read_npy.py ./train_output/logs/original_test_idx.npy
+
+# Check prediction results
+python read_npy.py ./train_output/logs/dnn_tes_res_record.npy
+```
+
+The `read_npy.py` script will show you:
+- Array shapes and dimensions
+- Sample data for understanding structure
+- Interactive options to explore specific slices
+- Ability to save as text files for external analysis
+
+---
