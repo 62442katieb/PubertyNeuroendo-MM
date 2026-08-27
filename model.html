@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>DNN Report</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({startOnLoad:true});</script>
+</head>
+<body>
+<h1>Fully-Connected 4-Layer DNN – Architecture &amp; Training Report</h1>
+<p><strong>Date:</strong> May 26, 2025<br />
+<strong>Author:</strong> James</p>
+<hr />
+<h2>1. Hyper-parameters</h2>
+<table>
+<thead>
+<tr>
+<th>Symbol / Arg</th>
+<th>Value</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>input_size</code></strong></td>
+<td>158</td>
+<td>Number of engineered features per sample</td>
+</tr>
+<tr>
+<td><strong>Hidden sizes</strong></td>
+<td><code>n_l1 = 64</code>, <code>n_l2 = 32</code>, <code>n_l3 = 16</code></td>
+<td>Pyramid shape balances expressiveness and overfitting risk</td>
+</tr>
+<tr>
+<td><strong><code>output_size</code></strong></td>
+<td><em>n</em><sub>phe</sub> (number of hormones)</td>
+<td>One output per hormone for multi-output regression</td>
+</tr>
+<tr>
+<td><strong>Dropout <code>p</code></strong></td>
+<td>0.5</td>
+<td>Strong regularization for small dataset</td>
+</tr>
+<tr>
+<td><strong>Batch size</strong></td>
+<td>64</td>
+<td>Good throughput on CPU/GPU</td>
+</tr>
+<tr>
+<td><strong>Optimizer</strong></td>
+<td>SGD (lr = 1 × 10<sup>−3</sup>, momentum = 0.9, weight-decay = 1 × 10<sup>−4</sup>)</td>
+<td>Classic momentum + L2</td>
+</tr>
+<tr>
+<td><strong>LR scheduler</strong></td>
+<td>Multi-step: ×0.1 at epochs 40 &amp; 80</td>
+<td>Step-drop after stagnation</td>
+</tr>
+<tr>
+<td><strong>Epochs</strong></td>
+<td>128</td>
+<td>Enough to converge after two LR drops</td>
+</tr>
+<tr>
+<td><strong>Early stopping patience</strong></td>
+<td>10 epochs</td>
+<td>Stop if validation loss does not improve for 10 consecutive epochs</td>
+</tr>
+<tr>
+<td><strong>Data split</strong></td>
+<td>64 % / 16 % / 20 % (train/val/test)</td>
+<td>Fixed random seed ensures reproducibility</td>
+</tr>
+<tr>
+<td><strong>Loader workers</strong></td>
+<td>4</td>
+<td>Parallel data loading on macOS/Windows</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>2. Model Architecture</h2>
+<div class="mermaid">
+graph LR
+    A["Input<br/>(158 features)"]
+    B["FC 158→64<br/>ReLU → BN → Dropout 0.5"]
+    C["FC 64→32<br/>ReLU → BN → Dropout 0.5"]
+    D["FC 32→16<br/>ReLU → BN → Dropout 0.5"]
+    E["FC 16→n_phe<br/>(Linear)"]
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+
+    style A fill:#dfe6fd,stroke:#4361ee
+    style B fill:#b5e48c
+    style C fill:#fee440
+    style D fill:#ff9f1c
+    style E fill:#f15bb5
+</div>
+
+<p><strong>Figure 1</strong> – 4-layer fully-connected DNN: each block = Linear → ReLU → BatchNorm1d → Dropout.</p>
+<hr />
+<h2>3. Data I/O</h2>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Shape</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Raw X</strong></td>
+<td><code>(N, 158)</code></td>
+<td>Float features (optionally standardized)</td>
+</tr>
+<tr>
+<td><strong>Raw y</strong></td>
+<td><code>(N, n_phe)</code></td>
+<td>Each column = a hormone outcome</td>
+</tr>
+<tr>
+<td><strong>Train/Val/Test</strong></td>
+<td>64 % / 16 % / 20 %</td>
+<td><code>train_test_split</code> twice</td>
+</tr>
+<tr>
+<td><strong>Batch</strong></td>
+<td><code>(64, 158)</code> → … → <code>(64, n_phe)</code></td>
+<td>DataLoader w/ <code>pin_memory</code> for CUDA transfers</td>
+</tr>
+</tbody>
+</table>
+<p>Normalization:<br />
+- y targets z-normalized per hormone (µ, σ from train).<br />
+- MAE later rescaled by σ for original units.</p>
+<hr />
+<h2>4. Validation, Logging &amp; Early Stopping</h2>
+<p>Each epoch on validation produces:</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Function</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Val Loss</strong></td>
+<td><code>msenanloss</code></td>
+<td>Masked MSE over validation set</td>
+</tr>
+<tr>
+<td><strong>Pearson r</strong></td>
+<td><code>nanpearsonr</code></td>
+<td>Linear correlation, NaN-safe</td>
+</tr>
+<tr>
+<td><strong>R² (COD)</strong></td>
+<td><code>nancod_znormed</code></td>
+<td>Variance explained after z-normalization</td>
+</tr>
+<tr>
+<td><strong>MAE</strong></td>
+<td><code>nanmean(|ŷ−y|)×σ</code></td>
+<td>Rescaled mean absolute error in original units</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Early stopping:</strong> stops training if <strong>validation loss</strong> fails to improve for <strong>10</strong> consecutive epochs; best weights saved for each run.</p>
+<p><strong>Checkpoints &amp; Logs:</strong><br />
+- <strong>Model snapshots:</strong> <code>./train_output/trained_model_abcd/run{run}_epoch{epoch}.pt</code><br />
+- <strong>Best model:</strong> <code>.../trained_model_abcd/best_run{run}.pt</code><br />
+- <strong>Logs:</strong> <code>./train_output/logs/{model_str}_{record}.npy</code></p>
+<hr />
+<h2>5. Explainability via Integrated Gradients</h2>
+<p>We use Captum’s <strong>IntegratedGradients</strong> to attribute input features:</p>
+<ul>
+<li><strong>Baseline:</strong> zero vector, broadcasted to batch  </li>
+<li><strong>Steps:</strong> 50 Riemann steps for path integral  </li>
+<li><strong>Target:</strong> output neuron index per hormone  </li>
+</ul>
+<pre><code class="language-python">from captum.attr import IntegratedGradients
+
+ig = IntegratedGradients(net)
+attr = ig.attribute(
+    inputs=x,
+    baselines=torch.zeros((1, x.size(1))).to(device),
+    target=target_index,
+    n_steps=50
+)
+</code></pre>
+<p><strong>Output:</strong> <code>./train_output/feature_importance_ig/run{run}_target{target}_relevance.npy</code></p>
+<hr />
+<h2>6. Participant Mapping &amp; Index Tracking</h2>
+<p><strong>Problem:</strong> The training logs save predictions (<code>tes_res_record</code>, <code>val_res_record</code>) but without participant IDs, making it impossible to match predictions back to individual participants.</p>
+<p><strong>Solution:</strong> Added participant index tracking to maintain the mapping between prediction arrays and original dataset rows.</p>
+<h3>What's Added to model.py:</h3>
+<ol>
+<li>
+<p><strong>Index tracking variables</strong> (lines 438-443):
+   <code>python
+   # Track participant indices for each split
+   original_train_idx = idx_train  # Original dataset indices for training split
+   original_test_idx = idx_test    # Original dataset indices for test split
+   original_val_idx = idx_train[idx_val]  # Original dataset indices for validation split
+   original_train_final_idx = idx_train[idx_tr]  # Original dataset indices for final training split</code></p>
+</li>
+<li>
+<p><strong>Participant mapping dictionary</strong> (lines 588-600):
+   <code>python
+   participant_mapping = {
+       'test_indices': original_test_idx,          # Maps tes_res_record[run, epoch, i] -&gt; original_test_idx[i]
+       'val_indices': original_val_idx,            # Maps val_res_record[run, epoch, i] -&gt; original_val_idx[i]
+       'train_final_indices': original_train_final_idx,  # Final training set indices
+       'split_info': {
+           'total_participants': N,
+           'train_size': len(original_train_final_idx),
+           'val_size': len(original_val_idx),
+           'test_size': len(original_test_idx),
+           'random_seed': seed
+       }
+   }</code></p>
+</li>
+<li>
+<p><strong>Saved to logs</strong>: All index mappings are saved as <code>.npy</code> files in <code>./train_output/logs/</code>:</p>
+</li>
+<li><code>original_test_idx.npy</code>: Maps test predictions to original dataset rows</li>
+<li><code>original_val_idx.npy</code>: Maps validation predictions to original dataset rows</li>
+<li><code>original_train_final_idx.npy</code>: Maps training predictions to original dataset rows</li>
+<li>
+<p><code>participant_mapping.npy</code>: Complete mapping information</p>
+</li>
+<li>
+<p><strong>Training DataLoader</strong>: Changed <code>shuffle=False</code> to maintain index order for participant tracking.</p>
+</li>
+</ol>
+<h3>How to Use Participant Mapping:</h3>
+<h4>Step 1: Load your original dataset</h4>
+<pre><code class="language-python">import pandas as pd
+import numpy as np
+
+# Load original dataset
+df = pd.read_pickle('synthetic_dset-M.pkl')  # or synthetic_dset_F.pkl
+</code></pre>
+<h4>Step 2: Read the mapping files</h4>
+<pre><code class="language-python"># Read participant mapping
+test_indices = np.load('./train_output/logs/original_test_idx.npy')
+val_indices = np.load('./train_output/logs/original_val_idx.npy')
+participant_mapping = np.load('./train_output/logs/participant_mapping.npy', allow_pickle=True).item()
+
+# Read prediction results
+test_predictions = np.load('./train_output/logs/dnn_tes_res_record.npy')  # Shape: (runs, epochs, n_test, n_hormones)
+val_predictions = np.load('./train_output/logs/dnn_val_res_record.npy')   # Shape: (runs, epochs, n_val, n_hormones)
+</code></pre>
+<h4>Step 3: Match predictions to participants</h4>
+<pre><code class="language-python"># Example: Get test predictions for run 0, epoch 50
+run_id = 0
+epoch_id = 50
+test_pred = test_predictions[run_id, epoch_id]  # Shape: (n_test, n_hormones)
+
+# Match to original participants
+test_participant_data = df.iloc[test_indices]  # Original participant data
+test_participant_data['predicted_dhea'] = test_pred[:, 0]  # Add predictions
+test_participant_data['predicted_ert'] = test_pred[:, 1]
+
+# Now you can analyze by participant characteristics
+print(&quot;Test predictions with participant info:&quot;)
+print(test_participant_data[['site_id_l', 'filtered_dhea', 'predicted_dhea', 'filtered_ert', 'predicted_ert']].head())
+</code></pre>
+<h3>Using read_npy.py for Participant Mapping:</h3>
+<pre><code class="language-bash"># List all available log files
+python read_npy.py list ./train_output/logs
+
+# Check participant mapping structure
+python read_npy.py ./train_output/logs/participant_mapping.npy
+
+# Check test indices
+python read_npy.py ./train_output/logs/original_test_idx.npy
+
+# Check prediction results
+python read_npy.py ./train_output/logs/dnn_tes_res_record.npy
+</code></pre>
+<p>The <code>read_npy.py</code> script will show you:
+- Array shapes and dimensions
+- Sample data for understanding structure
+- Interactive options to explore specific slices
+- Ability to save as text files for external analysis</p>
+<hr />
+</body>
+</html>
