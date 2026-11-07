@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "PubertyNeuroendo-MM: Deep neural network models of hormone-related brain morphology in adolescence"
+abstract: >-
+  Code for training and interpreting fully connected deep neural networks that
+  predict pubertal hormone levels (DHEA, testosterone, and estradiol) from gray
+  matter morphology,
+  with explainable AI (integrated gradients, layer-wise relevance propagation)
+  to identify hormone-related brain regions. Includes synthetic datasets for
+  testing the pipeline.
+authors:
+  - family-names: Bottenhorn
+    given-names: Katherine L.
+    affiliation: Florida International University
+    orcid: "https://orcid.org/0000-0002-7796-8795"
+  - family-names: Tian
+    given-names: Jinyao
+    affiliation: Keck School of Medicine of USC
+repository-code: "https://github.com/62442katieb/PubertyNeuroendo-MM"
+license: BSD-3-Clause
+version: 0.1.0
+date-released: "2026-11-07"  
+keywords:
+  - puberty
+  - neuroendocrinology
+  - sex hormones
+  - adolescent brain development
+  - deep learning
+  - explainable AI
+  - neuroimaging
